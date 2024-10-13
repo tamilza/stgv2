@@ -1,0 +1,110 @@
+version: "3.8"
+services:
+
+  nginx:
+    container_name: ${APP_MODE}-${GROUP}-v2-APKnginx
+    build: 
+      context: .
+      target: nginx
+      args:
+        - HOST_UI_PATH=${HOST_UI_PATH}
+    ports:
+      #-HOST:CONTAINER
+      # APK api port taken from .env due to all GROUPs docker instances deployed  on same server will have port conflict if hardcode
+      - "${APP_API_PORT}:${APP_API_PORT}"
+      # comment5ed below, only required for external http req
+      # - '8888:80'
+      # - '8889:443/tcp'
+      # - '8889:443/udp'
+    restart: unless-stopped
+    depends_on:
+      - build
+    volumes:
+      - ${HOST_API_PATH}/public/:/var/www/public/
+      - ./uploads/:/var/www/html/uploads:ro
+      # commented this due to permission issue , not sure how to fix
+      #- ./logs/nginx:/var/log/nginx/ 
+      - ./docker/nginx/common/modules.conf:/etc/nginx/main.d/modules.conf:ro
+      - ./docker/nginx/common/perl_rewrite.conf:/etc/nginx/conf.d/perl_rewrite.conf:ro
+      - ./docker/nginx/common/general.conf:/etc/nginx/conf.d/general.conf:ro
+      - ./docker/nginx/common/upstreams.conf:/etc/nginx/conf.d/upstreams.conf:ro
+      - ./docker/nginx/proxies/static.conf:/etc/nginx/local/proxies/static.conf:ro
+      - ./docker/nginx/proxies/common/fastcgi.conf:/etc/nginx/local/proxies/common/fastcgi.conf:ro
+      - ./docker/nginx/proxies/common/proxy.conf:/etc/nginx/local/proxies/common/proxy.conf:ro
+      - ./docker/nginx/http-internal-template.conf:/etc/nginx/local/http-internal-template.conf:ro 
+      - ./docker/nginx/agents_conf/:/etc/nginx/agents_conf:ro
+      #- ./docker/nginx/njs.conf:/etc/nginx/conf.d/njs.conf:ro
+      #- ./docker/nginx/njs:/opt/njs:ro 
+
+      # - ./docker/nginx/proxies/node-server.conf:/etc/nginx/local/proxies/node-server.conf:ro
+      # - ./docker/nginx/proxies/php-fpm.conf:/etc/nginx/local/proxies/php-fpm.conf:ro
+      # - ./docker/nginx/__https-external.conf:/etc/nginx/conf.d/__https-external.conf:ro
+      - ./docker/nginx/http-php-fpm.conf:/etc/nginx/conf.d/http-php-fpm.conf:ro
+      - ./docker/nginx/localhost.crt:/etc/nginx/ssl/localhost.crt:ro
+      - ./docker/nginx/localhost.key:/etc/nginx/ssl/localhost.key:ro
+    networks:
+      - internal
+      # - tunnel
+    environment:
+      - NODE_PORT=${NODE_PORT}
+      - APP_API_KEY=${APP_API_KEY}
+      - APP_MODE=${APP_MODE}
+      - GROUP=${GROUP}
+      - APP_API_PORT=${APP_API_PORT}
+      - APP_TARGET=APK
+ 
+  # php service
+  php:
+    #container_name: php
+    build:
+      context: .
+      target: php
+      args:
+        - HOST_API_PATH=${HOST_API_PATH}
+        - HOST_GID=${HOST_GID}
+        - HOST_UID=${HOST_UID}
+        - HOST_USER=${HOST_USER}
+    working_dir: /var/www
+    # env_file: ${HOST_API_PATH}/.env
+    volumes:
+      - ${HOST_API_PATH}/:/var/www
+      - ./logs/php-fpm.log:/var/log/fpm-php.www.log 
+    networks:
+      - internal
+    restart: "${DOCKER_RESTART_POLICY:-unless-stopped}"
+
+  build:
+    build:
+      context: . 
+      target: build 
+      args:
+        - HOST_UI_PATH=${HOST_UI_PATH} 
+
+  # node service
+  node:
+    #container_name: node
+    build:
+      context: .
+      target: node
+      args:
+        - HOST_UI_PATH=${HOST_UI_PATH}
+        - NODE_PORT=${NODE_PORT}
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - build
+      - nginx
+    environment:
+      - NGINX_HOST=http://nginx:3000
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+      - NODE_ENV=production
+      - PORT=${NODE_PORT} 
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+  # tunnel:
+    # external: true
+    # name: tunnel
